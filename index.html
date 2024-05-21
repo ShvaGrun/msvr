@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>PA#1</title>
+    <style>
+        body {
+            background-color: #EEEEEE;
+        }
+    </style>
+
+    <script src="./Utils/trackball-rotator.js"></script>
+    <script src="./Utils/m4.js"></script>
+    <script src="./shader.gpu"></script>
+</head>
+
+<body onload="init()">
+
+    <h2>Virich Cyclic Surface</h2>
+
+    <p id="message">Drag your mouse on the surface to rotate it.<br>
+        (On a touch screen, you can use your finger.)</p>
+
+    <div id="input-fields">
+        <label for="a">a:</label>
+        <input type="text" id="a" value="1.5"><br>
+
+        <label for="b">b:</label>
+        <input type="text" id="b" value="3"><br>
+
+        <label for="c">c:</label>
+        <input type="text" id="c" value="2"><br>
+
+        <label for="d">d:</label>
+        <input type="text" id="d" value="2"><br>
+
+        <label for="m">Scale m:</label>
+        <input type="text" id="m" value="0.5"><br>
+
+        <label for="v_end_pi">v end pi:</label>
+        <input type="text" id="v_end_pi" value="2"><br>
+
+        <label for="t_end_pi">t end pi:</label>
+        <input type="text" id="t_end_pi" value="2"><br>
+
+        <button id="draw">Redraw</button>
+    </div>
+
+
+    <div id="canvas-holder">
+        <canvas width="600" height="600" id="webglcanvas" style="background-color:red"></canvas>
+    </div>
+    <script src="./main.js"></script>
+</body>
+
+</html>
