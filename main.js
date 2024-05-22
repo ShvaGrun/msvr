@@ -15,15 +15,13 @@ let t_end_pi = 2;
 
 // 3d part
 let stereo_camera;
-let conv = Number(document.getElementById("conv").value);
-let eyes = Number(document.getElementById("eyes").value);
-let fov = Number(document.getElementById("fov").value);
+let conv = 1;
+let eyes = 1;
+let fov = 45;
 let near_clips = Number(document.getElementById("near_clips").value);
 let horizontal_steps = 0;
 
 
-
-document.getElementById("draw").addEventListener("click", redraw);
 
 
 // Constructor
@@ -89,9 +87,7 @@ function ShaderProgram(name, program) {
  * (Note that the use of the above drawPrimitive function is not an efficient
  * way to draw with WebGL.  Here, the geometry is so simple that it doesn't matter.)
  */
-function draw() {
-    
-    
+function draw() {   
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
@@ -238,7 +234,7 @@ function createProgram(gl, vShader, fShader) {
  */
 function init() {
 
-    
+    horizontal_steps = 0;
     let canvas;
     try {
         canvas = document.getElementById("webglcanvas");
@@ -270,7 +266,7 @@ document.getElementById("conv").addEventListener("change",(e)=>{
     conv = Number(document.getElementById('conv').value);
     document.getElementById("conv_indicator").innerHTML  = conv;
     stereo_camera.Convergence = conv;
-    draw();
+    init();
 });
 
 
@@ -278,7 +274,7 @@ document.getElementById("eyes").addEventListener("change",(e)=>{
     eyes = Number(document.getElementById('eyes').value);
     document.getElementById("eyes_indicator").innerHTML  = eyes;
     stereo_camera.EyeSeparation = eyes;
-    draw();
+    init();
 });
 
 
@@ -286,7 +282,7 @@ document.getElementById("fov").addEventListener("change",(e)=>{
     fov = Number(document.getElementById('fov').value);
     document.getElementById("fov_indicator").innerHTML  = fov;
     stereo_camera.mFOV = fov;
-    draw();
+    init();
 });
 
 
@@ -294,5 +290,5 @@ document.getElementById("near_clips").addEventListener("change",(e)=>{
     near_clips = Number(document.getElementById('near_clips').value);
     document.getElementById("near_clips_indicator").innerHTML  = near_clips;
     stereo_camera.Convergence = near_clips;
-    draw();
+    init();
 });
