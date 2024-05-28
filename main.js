@@ -265,30 +265,30 @@ function init() {
 document.getElementById("conv").addEventListener("change",(e)=>{
     conv = Number(document.getElementById('conv').value);
     document.getElementById("conv_indicator").innerHTML  = conv;
-    stereo_camera.Convergence = conv;
-    init();
+    stereo_camera.mConvergence = conv;
+    draw();
 });
 
 
 document.getElementById("eyes").addEventListener("change",(e)=>{
     eyes = Number(document.getElementById('eyes').value);
     document.getElementById("eyes_indicator").innerHTML  = eyes;
-    stereo_camera.EyeSeparation = eyes;
-    init();
+    stereo_camera.mEyeSeparation = eyes;
+    draw();
 });
 
 
 document.getElementById("fov").addEventListener("change",(e)=>{
-    fov = Number(document.getElementById('fov').value);
-    document.getElementById("fov_indicator").innerHTML  = fov;
+    fov = (Number(document.getElementById('fov').value) * Math.PI)/180;
+    document.getElementById("fov_indicator").innerHTML  = Number(document.getElementById('fov').value);
     stereo_camera.mFOV = fov;
-    init();
+    draw();
 });
 
 
 document.getElementById("near_clips").addEventListener("change",(e)=>{
     near_clips = Number(document.getElementById('near_clips').value);
     document.getElementById("near_clips_indicator").innerHTML  = near_clips;
-    stereo_camera.Convergence = near_clips;
-    init();
+    stereo_camera.mNearClippingDistance = near_clips;
+    draw();
 });
