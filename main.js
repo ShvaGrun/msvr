@@ -18,7 +18,7 @@ let stereo_camera;
 let conv = 1;
 let eyes = 1;
 let fov = 45;
-let near_clips = Number(document.getElementById("near_clips").value);
+let near_clips = 2;
 let horizontal_steps = 0;
 
 
