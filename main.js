@@ -21,46 +21,47 @@ let fov = 45;
 let near_clips = 2;
 let horizontal_steps = 0;
 
-
+let webCamera;
+let webCameraTexture;
+let webCameraModel;
 
 
 // Constructor
 function Model(name) {
     this.name = name;
     this.iVertexBuffer = gl.createBuffer();
+    this.iVertexTextureBuffer = gl.createBuffer();
     this.count = 0;
-    this.BufferData = function(vertices) {
+
+    this.BufferData = function (vertices) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
-
-
         this.count = vertices.length / 3;
-
-        console.log(vertices.length);
-        console.log(this.count);
     };
 
-    this.Draw = function() {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
-        if (shProgram.iAttribVertex !== -1) {
-            gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
-            gl.enableVertexAttribArray(shProgram.iAttribVertex);
-        }
-
-        gl.drawArrays(gl.TRIANGLES, 0, this.count);
+    this.TextureBufferData = function (vertices) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexTextureBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
     };
 
     this.DrawLines = function () {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
-        if (shProgram.iAttribVertex !== -1) {
-            gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
-            gl.enableVertexAttribArray(shProgram.iAttribVertex);
-        }
-        console.log("steps: " + horizontal_steps);
+        gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(shProgram.iAttribVertex);
         let n = this.count / horizontal_steps;
         for (let i = 0; i < horizontal_steps; i++) {
             gl.drawArrays(gl.LINE_STRIP, n * i, n);
         }
+    };
+
+    this.DrawTextured = function () {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
+        gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(shProgram.iAttribVertex);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexTextureBuffer);
+        gl.vertexAttribPointer(shProgram.iAttribVertexTexture, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(shProgram.iAttribVertexTexture);
+        gl.drawArrays(gl.TRIANGLES, 0, this.count);
     };
 }
 
@@ -87,7 +88,7 @@ function ShaderProgram(name, program) {
  * (Note that the use of the above drawPrimitive function is not an efficient
  * way to draw with WebGL.  Here, the geometry is so simple that it doesn't matter.)
  */
-function draw() {   
+function draw(animate = false) {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
@@ -98,23 +99,36 @@ function draw() {
     let modelView = spaceball.getViewMatrix();
 
     let rotateToPointZero = m4.axisRotation([0.707, 0.707, 0], 0.7);
-    let translateToPointZero = m4.translation(0, 0, -10);
+    let translateToPointZero = m4.translation(0, 0, -5);
 
     let matAccum0 = m4.multiply(rotateToPointZero, modelView);
     let matAccum1 = m4.multiply(translateToPointZero, matAccum0);
 
-    /* Multiply the projection matrix times the modelview matrix to give the
-       combined transformation matrix, and send that to the shader program. */
+    gl.uniform1f(shProgram.iT, true);
+    gl.bindTexture(gl.TEXTURE_2D, webCameraTexture);
+    
+    gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            webCamera
+        );
+    
+    gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, m4.identity());
+    webCameraModel.DrawTextured();
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    gl.uniform1f(shProgram.iT, false);
+
+    // Draw surface model
     let modelViewProjection = m4.multiply(projection, matAccum1);
-
-    gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, modelViewProjection);
-
     stereo_camera.ApplyLeftFrustum();
     modelViewProjection = m4.multiply(stereo_camera.projection, m4.multiply(stereo_camera.modelView, matAccum1));
     gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, modelViewProjection);
     gl.colorMask(true, false, false, false);
     gl.uniform4fv(shProgram.iColor, [1, 1, 0, 1]);
-    surface.Draw();
+    surface.DrawTextured();
     gl.uniform4fv(shProgram.iColor, [0, 0, 1, 1]);
     surface.DrawLines();
 
@@ -125,12 +139,15 @@ function draw() {
     gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, modelViewProjection);
     gl.colorMask(false, true, true, false);
     gl.uniform4fv(shProgram.iColor, [1, 1, 0, 1]);
-    surface.Draw();
+    surface.DrawTextured();
     gl.uniform4fv(shProgram.iColor, [0, 0, 1, 1]);
     surface.DrawLines();
 
     gl.colorMask(true, true, true, true);
     
+    if (animate) {
+        window.requestAnimationFrame(() => draw(true));
+    }
 }
 
 function CalculateVertex(v, t) {
@@ -182,16 +199,31 @@ function initGL() {
     shProgram = new ShaderProgram('Basic', prog);
     shProgram.Use();
     shProgram.iAttribVertex = gl.getAttribLocation(prog, "vertex");
+    shProgram.iAttribVertexTexture = gl.getAttribLocation(prog, "textureCoords");
     shProgram.iModelViewProjectionMatrix = gl.getUniformLocation(prog, "ModelViewProjectionMatrix");
     shProgram.iColor = gl.getUniformLocation(prog, "color");
-
-    if (shProgram.iAttribVertex !== -1) {
-        gl.enableVertexAttribArray(shProgram.iAttribVertex);
-    }
-
+    shProgram.iT = gl.getUniformLocation(prog, "textured");
 
     surface = new Model('Surface');
-    surface.BufferData(CreateSurfaceData());
+    surface.BufferData(CreateSurfaceData(),);
+    surface.TextureBufferData(CreateSurfaceData(),);
+    webCameraModel = new Model('Webcam');
+    webCameraModel.BufferData([
+        -1, -1, 0,
+        1, -1, 0,
+        1, 1, 0,
+        -1, -1, 0,
+        1, 1, 0,
+        -1, 1, 0
+    ]);
+    webCameraModel.TextureBufferData([
+        0, 1,
+        1, 1,
+        1, 0,
+        0, 1,
+        1, 0,
+        0, 0
+    ]);
 
     gl.enable(gl.DEPTH_TEST);
 }
@@ -233,8 +265,7 @@ function createProgram(gl, vShader, fShader) {
  * initialization function that will be called when the page has loaded
  */
 function init() {
-
-    horizontal_steps = 0;
+    webCamera = getWebCamera();
     let canvas;
     try {
         canvas = document.getElementById("webglcanvas");
@@ -258,8 +289,9 @@ function init() {
             "<p>Sorry, could not initialize the WebGL graphics context: " + e + "</p>";
         return;
     }
-
-    draw();
+    webCameraTexture = setTexture();
+    spaceball = new TrackballRotator(canvas, draw, 0);
+    draw(true);
 }
 
 document.getElementById("conv").addEventListener("change",(e)=>{
