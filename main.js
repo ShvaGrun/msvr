@@ -5,6 +5,43 @@ let surface;                    // A surface model
 let shProgram;                  // A shader program
 let spaceball;                  // A SimpleRotator object that lets the user rotate the view by mouse.
 
+// Vertex shader
+const vertexShaderSource = `
+attribute vec3 vertex;
+attribute vec2 textureCoords;
+uniform mat4 ModelViewProjectionMatrix;
+
+varying vec2 vTC;
+uniform bool textured;
+
+void main() {
+    if(textured){
+        vTC=textureCoords;
+    }
+    gl_Position = ModelViewProjectionMatrix * vec4(vertex,1.0);
+}`;
+
+
+// Fragment shader
+const fragmentShaderSource = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+   precision highp float;
+#else
+   precision mediump float;
+#endif
+
+uniform vec4 color;
+uniform sampler2D TMU;
+varying vec2 vTC;
+uniform bool textured;
+void main() {
+    vec4 tColor = texture2D(TMU, vTC);
+    gl_FragColor = color;
+    if(textured){
+        gl_FragColor = tColor;
+    }
+}`;
+
 let m = 0.5;
 let a = 1.5 * m;
 let b = 3 * m;
