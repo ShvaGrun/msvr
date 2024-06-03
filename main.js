@@ -9,40 +9,8 @@ let audioContext;
 let track;
 let panner;
 let lowpassFilter;
-
-// Vertex shader
-const vertexShaderSource = `
-attribute vec3 vertex;
-attribute vec2 textureCoords;
-uniform mat4 ModelViewProjectionMatrix;
-
-varying vec2 vTC;
-uniform bool textured;
-
-void main() {
-    if(textured){
-        vTC = textureCoords;
-    }
-    gl_Position = ModelViewProjectionMatrix * vec4(vertex,1.0);
-}`;
-
-// Fragment shader
-const fragmentShaderSource = `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-   precision highp float;
-#else
-   precision mediump float;
-#endif
-
-uniform vec4 color;
-uniform sampler2D TMU;
-varying vec2 vTC;
-uniform bool textured;
-
-void main() {
-    vec4 tColor = texture2D(TMU, vTC);
-    gl_FragColor = textured ? tColor : color;
-}`;
+let angle = 0;
+const radius = 2; // Radius of the circle for the sphere
 
 let m = 0.5;
 let a = 1.5 * m;
@@ -63,6 +31,43 @@ let horizontal_steps = 0;
 let webCamera;
 let webCameraTexture;
 let webCameraModel;
+let sphereCoords = { x: 0, y: 0, z: 0 };
+let sphere;
+let startTime = null;
+
+// Vertex shader
+const vertexShaderSource = `
+attribute vec3 vertex;
+attribute vec2 textureCoords;
+uniform mat4 ModelViewProjectionMatrix;
+
+varying vec2 vTC;
+uniform bool textured;
+
+void main() {
+    if (textured) {
+        vTC = textureCoords;
+    }
+    gl_Position = ModelViewProjectionMatrix * vec4(vertex, 1.0);
+}`;
+
+// Fragment shader
+const fragmentShaderSource = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+   precision highp float;
+#else
+   precision mediump float;
+#endif
+
+uniform vec4 color;
+uniform sampler2D TMU;
+varying vec2 vTC;
+uniform bool textured;
+
+void main() {
+    vec4 tColor = texture2D(TMU, vTC);
+    gl_FragColor = textured ? tColor : color;
+}`;
 
 // Constructor
 function Model(name) {
@@ -107,23 +112,18 @@ function Model(name) {
 function ShaderProgram(name, program) {
     this.name = name;
     this.prog = program;
-
-    // Location of the attribute variable in the shader program.
     this.iAttribVertex = -1;
-    // Location of the uniform specifying a color for the primitive.
+    this.iAttribVertexTexture = -1;
     this.iColor = -1;
-    // Location of the uniform matrix representing the combined transformation.
     this.iModelViewProjectionMatrix = -1;
     this.iT = -1;
-    this.iAttribVertexTexture = -1;
 
-    this.Use = function() {
+    this.Use = function () {
         gl.useProgram(this.prog);
     };
 }
 
 function draw(animate = false) {
-    gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     let projection = m4.perspective(Math.PI / 8, 1, 8, 12);
@@ -138,17 +138,21 @@ function draw(animate = false) {
     gl.uniform1f(shProgram.iT, true);
     gl.bindTexture(gl.TEXTURE_2D, webCameraTexture);
 
-    gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        webCamera
-    );
+    if (webCamera.readyState >= 2) { // Check if the video is ready
+        gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            webCamera
+        );
+    }
 
     gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, m4.identity());
-    webCameraModel.DrawTextured();
+    if (webCameraModel) {
+        webCameraModel.DrawTextured();
+    }
     gl.clear(gl.DEPTH_BUFFER_BIT);
     gl.uniform1f(shProgram.iT, false);
 
@@ -162,6 +166,8 @@ function draw(animate = false) {
     gl.uniform4fv(shProgram.iColor, [0, 0, 1, 1]);
     surface.DrawLines();
 
+    drawSphere(modelViewProjection);
+
     gl.clear(gl.DEPTH_BUFFER_BIT);
 
     stereo_camera.ApplyRightFrustum();
@@ -173,11 +179,29 @@ function draw(animate = false) {
     gl.uniform4fv(shProgram.iColor, [0, 0, 1, 1]);
     surface.DrawLines();
 
+    drawSphere(modelViewProjection);
+
     gl.colorMask(true, true, true, true);
 
     if (animate) {
-        window.requestAnimationFrame(() => draw(true));
+        window.requestAnimationFrame(() => {
+            draw(true);
+        });
     }
+}
+
+function drawSphere(modelViewProjection) {
+    moveSphere();
+    gl.bindBuffer(gl.ARRAY_BUFFER, sphere.positionBuffer);
+    gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(shProgram.iAttribVertex);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphere.indexBuffer);
+
+    gl.uniform4fv(shProgram.iColor, [1, 0, 0, 1]);  // Sphere color (red)
+    gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, m4.translation(sphereCoords.x, sphereCoords.y, sphereCoords.z));
+
+    gl.drawElements(gl.TRIANGLES, sphere.vertexCount, gl.UNSIGNED_SHORT, 0);
 }
 
 function CalculateVertex(v, t) {
@@ -219,12 +243,86 @@ function CreateSurfaceData() {
     return vertexList;
 }
 
+function CreateSphereData() {
+    const latitudeBands = 30;
+    const longitudeBands = 30;
+    const radius = 0.05;
+
+    const vertexPositionData = [];
+    const indexData = [];
+
+    for (let latNumber = 0; latNumber <= latitudeBands; latNumber++) {
+        const theta = latNumber * Math.PI / latitudeBands;
+        const sinTheta = Math.sin(theta);
+        const cosTheta = Math.cos(theta);
+
+        for (let longNumber = 0; longNumber <= longitudeBands; longNumber++) {
+            const phi = longNumber * 2 * Math.PI / longitudeBands;
+            const sinPhi = Math.sin(phi);
+            const cosPhi = Math.cos(phi);
+
+            const x = cosPhi * sinTheta;
+            const y = cosTheta;
+            const z = sinPhi * sinTheta;
+
+            vertexPositionData.push(radius * x);
+            vertexPositionData.push(radius * y);
+            vertexPositionData.push(radius * z);
+        }
+    }
+
+    for (let latNumber = 0; latNumber < latitudeBands; latNumber++) {
+        for (let longNumber = 0; longNumber < longitudeBands; longNumber++) {
+            const first = (latNumber * (longitudeBands + 1)) + longNumber;
+            const second = first + longitudeBands + 1;
+            indexData.push(first);
+            indexData.push(second);
+            indexData.push(first + 1);
+
+            indexData.push(second);
+            indexData.push(second + 1);
+            indexData.push(first + 1);
+        }
+    }
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexPositionData), gl.STATIC_DRAW);
+
+    const indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexData), gl.STATIC_DRAW);
+
+    return {
+        positionBuffer: positionBuffer,
+        indexBuffer: indexBuffer,
+        vertexCount: indexData.length
+    };
+}
+
+function moveSphere() {
+    let radius = 1.0;
+    if (startTime === null) {
+        startTime = performance.now();
+    }
+    let currentTime = performance.now();
+    let elapsedTime = (currentTime - startTime) / 1000; // Time in seconds
+
+    // Update sphere coordinates for circular motion
+    sphereCoords.x = radius * Math.sin(elapsedTime);
+    sphereCoords.y = 0;
+    sphereCoords.z = radius * Math.cos(elapsedTime); // Assuming the sphere moves in the XY plane
+    // Update the position of the sound panner to match the sphere's coordinates
+    setPannerPosition(sphereCoords.x, sphereCoords.y, sphereCoords.z);
+}
+
 /* Initialize the WebGL context. Called from init() */
 function initGL() {
     let prog = createProgram(gl, vertexShaderSource, fragmentShaderSource);
 
     shProgram = new ShaderProgram('Basic', prog);
     shProgram.Use();
+
     shProgram.iAttribVertex = gl.getAttribLocation(prog, "vertex");
     shProgram.iAttribVertexTexture = gl.getAttribLocation(prog, "textureCoords");
     shProgram.iModelViewProjectionMatrix = gl.getUniformLocation(prog, "ModelViewProjectionMatrix");
@@ -234,6 +332,10 @@ function initGL() {
     surface = new Model('Surface');
     surface.BufferData(CreateSurfaceData());
     surface.TextureBufferData(CreateSurfaceData());
+
+    // Initialize sphere
+    sphere = CreateSphereData();
+
     webCameraModel = new Model('Webcam');
     webCameraModel.BufferData([
         -1, -1, 0,
@@ -255,40 +357,31 @@ function initGL() {
     gl.enable(gl.DEPTH_TEST);
 }
 
-/* Creates a program for use in the WebGL context gl, and returns the
- * identifier for that program.  If an error occurs while compiling or
- * linking the program, an exception of type Error is thrown.  The error
- * string contains the compilation or linking error.  If no error occurs,
- * the program identifier is the return value of the function.
- * The second and third parameters are strings that contain the
- * source code for the vertex shader and for the fragment shader.
- */
+/* Creates a program for use in the WebGL context gl, and returns the identifier for that program. */
 function createProgram(gl, vShader, fShader) {
     let vsh = gl.createShader(gl.VERTEX_SHADER);
     gl.shaderSource(vsh, vShader);
     gl.compileShader(vsh);
     if (!gl.getShaderParameter(vsh, gl.COMPILE_STATUS)) {
-        throw new Error("Error in vertex shader:  " + gl.getShaderInfoLog(vsh));
+        throw new Error("Error in vertex shader: " + gl.getShaderInfoLog(vsh));
     }
     let fsh = gl.createShader(gl.FRAGMENT_SHADER);
     gl.shaderSource(fsh, fShader);
     gl.compileShader(fsh);
     if (!gl.getShaderParameter(fsh, gl.COMPILE_STATUS)) {
-        throw new Error("Error in fragment shader:  " + gl.getShaderInfoLog(fsh));
+        throw new Error("Error in fragment shader: " + gl.getShaderInfoLog(fsh));
     }
     let prog = gl.createProgram();
     gl.attachShader(prog, vsh);
     gl.attachShader(prog, fsh);
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-        throw new Error("Link error in program:  " + gl.getProgramInfoLog(prog));
+        throw new Error("Link error in program: " + gl.getProgramInfoLog(prog));
     }
     return prog;
 }
 
-/**
- * initialization function that will be called when the page has loaded
- */
+/* Initialization function that will be called when the page has loaded */
 function init() {
     webCamera = getWebCamera();
     let canvas;
@@ -305,10 +398,8 @@ function init() {
         return;
     }
     try {
-
-        stereo_camera = new StereoCamera(conv,eyes,1,fov,near_clips,30.0);
-
-        initGL(true);  // initialize the WebGL graphics context
+        stereo_camera = new StereoCamera(conv, eyes, 1, fov, near_clips, 30.0);
+        initGL(); // initialize the WebGL graphics context
         spaceball = new TrackballRotator(canvas, draw, 0);
     } catch (e) {
         document.getElementById("canvas-holder").innerHTML =
@@ -357,7 +448,7 @@ function initializeAudioControls() {
 
     lowpassCheckbox.addEventListener('change', updateAudioRouting);
 
-    audioElement.addEventListener('play', function() {
+    audioElement.addEventListener('play', function () {
         if (!audioContext) {
             initializeAudio();
         }
@@ -368,33 +459,38 @@ function initializeAudioControls() {
     });
 }
 
-document.getElementById("conv").addEventListener("change",(e)=>{
+document.getElementById("conv").addEventListener("change", (e) => {
     conv = Number(document.getElementById('conv').value);
-    document.getElementById("conv_indicator").innerHTML  = conv;
+    document.getElementById("conv_indicator").innerHTML = conv;
     stereo_camera.mConvergence = conv;
     draw();
 });
 
-
-document.getElementById("eyes").addEventListener("change",(e)=>{
+document.getElementById("eyes").addEventListener("change", (e) => {
     eyes = Number(document.getElementById('eyes').value);
-    document.getElementById("eyes_indicator").innerHTML  = eyes;
+    document.getElementById("eyes_indicator").innerHTML = eyes;
     stereo_camera.mEyeSeparation = eyes;
     draw();
 });
 
-
-document.getElementById("fov").addEventListener("change",(e)=>{
-    fov = (Number(document.getElementById('fov').value) * Math.PI)/180;
-    document.getElementById("fov_indicator").innerHTML  = Number(document.getElementById('fov').value);
+document.getElementById("fov").addEventListener("change", (e) => {
+    fov = (Number(document.getElementById('fov').value) * Math.PI) / 180;
+    document.getElementById("fov_indicator").innerHTML = Number(document.getElementById('fov').value);
     stereo_camera.mFOV = fov;
     draw();
 });
 
-
-document.getElementById("near_clips").addEventListener("change",(e)=>{
+document.getElementById("near_clips").addEventListener("change", (e) => {
     near_clips = Number(document.getElementById('near_clips').value);
-    document.getElementById("near_clips_indicator").innerHTML  = near_clips;
+    document.getElementById("near_clips_indicator").innerHTML = near_clips;
     stereo_camera.mNearClippingDistance = near_clips;
     draw();
 });
+
+function setPannerPosition(x, y, z) {
+    if (panner) {
+        panner.positionX.value = x;
+        panner.positionY.value = y;
+        panner.positionZ.value = z;
+    }
+}
