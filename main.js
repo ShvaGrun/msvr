@@ -5,6 +5,11 @@ let surface;                    // A surface model
 let shProgram;                  // A shader program
 let spaceball;                  // A SimpleRotator object that lets the user rotate the view by mouse.
 
+let audioContext;
+let track;
+let panner;
+let lowpassFilter;
+
 // Vertex shader
 const vertexShaderSource = `
 attribute vec3 vertex;
@@ -16,11 +21,10 @@ uniform bool textured;
 
 void main() {
     if(textured){
-        vTC=textureCoords;
+        vTC = textureCoords;
     }
     gl_Position = ModelViewProjectionMatrix * vec4(vertex,1.0);
 }`;
-
 
 // Fragment shader
 const fragmentShaderSource = `
@@ -34,12 +38,10 @@ uniform vec4 color;
 uniform sampler2D TMU;
 varying vec2 vTC;
 uniform bool textured;
+
 void main() {
     vec4 tColor = texture2D(TMU, vTC);
-    gl_FragColor = color;
-    if(textured){
-        gl_FragColor = tColor;
-    }
+    gl_FragColor = textured ? tColor : color;
 }`;
 
 let m = 0.5;
@@ -47,7 +49,7 @@ let a = 1.5 * m;
 let b = 3 * m;
 let c = 2 * m;
 let d = 2 * m;
-let v_end_pi = 2;    
+let v_end_pi = 2;
 let t_end_pi = 2;
 
 // 3d part
@@ -61,7 +63,6 @@ let horizontal_steps = 0;
 let webCamera;
 let webCameraTexture;
 let webCameraModel;
-
 
 // Constructor
 function Model(name) {
@@ -102,7 +103,6 @@ function Model(name) {
     };
 }
 
-
 // Constructor
 function ShaderProgram(name, program) {
     this.name = name;
@@ -114,25 +114,19 @@ function ShaderProgram(name, program) {
     this.iColor = -1;
     // Location of the uniform matrix representing the combined transformation.
     this.iModelViewProjectionMatrix = -1;
-    
+    this.iT = -1;
+    this.iAttribVertexTexture = -1;
+
     this.Use = function() {
         gl.useProgram(this.prog);
     };
 }
 
-
-/* Draws a colored cube, along with a set of coordinate axes.
- * (Note that the use of the above drawPrimitive function is not an efficient
- * way to draw with WebGL.  Here, the geometry is so simple that it doesn't matter.)
- */
 function draw(animate = false) {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    /* Set the values of the projection transformation */
     let projection = m4.perspective(Math.PI / 8, 1, 8, 12);
-
-    /* Get the view matrix from the SimpleRotator object.*/
     let modelView = spaceball.getViewMatrix();
 
     let rotateToPointZero = m4.axisRotation([0.707, 0.707, 0], 0.7);
@@ -143,22 +137,21 @@ function draw(animate = false) {
 
     gl.uniform1f(shProgram.iT, true);
     gl.bindTexture(gl.TEXTURE_2D, webCameraTexture);
-    
+
     gl.texImage2D(
-            gl.TEXTURE_2D,
-            0,
-            gl.RGBA,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            webCamera
-        );
-    
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        webCamera
+    );
+
     gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, m4.identity());
     webCameraModel.DrawTextured();
     gl.clear(gl.DEPTH_BUFFER_BIT);
     gl.uniform1f(shProgram.iT, false);
 
-    // Draw surface model
     let modelViewProjection = m4.multiply(projection, matAccum1);
     stereo_camera.ApplyLeftFrustum();
     modelViewProjection = m4.multiply(stereo_camera.projection, m4.multiply(stereo_camera.modelView, matAccum1));
@@ -181,7 +174,7 @@ function draw(animate = false) {
     surface.DrawLines();
 
     gl.colorMask(true, true, true, true);
-    
+
     if (animate) {
         window.requestAnimationFrame(() => draw(true));
     }
@@ -196,8 +189,6 @@ function CalculateVertex(v, t) {
     return [x, y, z];
 }
 
-
-
 function CreateSurfaceData() {
     let vertexList = [];
 
@@ -207,7 +198,7 @@ function CreateSurfaceData() {
             let vertex2 = CalculateVertex(v, t + 0.1);
             let vertex3 = CalculateVertex(v + 0.1, t);
             let vertex4 = CalculateVertex(v + 0.1, t + 0.1);
-            
+
             vertexList.push(...vertex1, ...vertex2, ...vertex3, ...vertex3, ...vertex2, ...vertex4);
             horizontal_steps++;
         }
@@ -228,7 +219,6 @@ function CreateSurfaceData() {
     return vertexList;
 }
 
-
 /* Initialize the WebGL context. Called from init() */
 function initGL() {
     let prog = createProgram(gl, vertexShaderSource, fragmentShaderSource);
@@ -242,8 +232,8 @@ function initGL() {
     shProgram.iT = gl.getUniformLocation(prog, "textured");
 
     surface = new Model('Surface');
-    surface.BufferData(CreateSurfaceData(),);
-    surface.TextureBufferData(CreateSurfaceData(),);
+    surface.BufferData(CreateSurfaceData());
+    surface.TextureBufferData(CreateSurfaceData());
     webCameraModel = new Model('Webcam');
     webCameraModel.BufferData([
         -1, -1, 0,
@@ -264,7 +254,6 @@ function initGL() {
 
     gl.enable(gl.DEPTH_TEST);
 }
-
 
 /* Creates a program for use in the WebGL context gl, and returns the
  * identifier for that program.  If an error occurs while compiling or
@@ -297,7 +286,6 @@ function createProgram(gl, vShader, fShader) {
     return prog;
 }
 
-
 /**
  * initialization function that will be called when the page has loaded
  */
@@ -307,6 +295,7 @@ function init() {
     try {
         canvas = document.getElementById("webglcanvas");
         gl = canvas.getContext("webgl");
+        initializeAudioControls();
         if (!gl) {
             throw "Browser does not support WebGL";
         }
@@ -329,6 +318,54 @@ function init() {
     webCameraTexture = setTexture();
     spaceball = new TrackballRotator(canvas, draw, 0);
     draw(true);
+}
+
+function initializeAudioControls() {
+    const audioElement = document.getElementById('audio');
+    const lowpassCheckbox = document.getElementById('lowpass');
+
+    function initializeAudio() {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        track = audioContext.createMediaElementSource(audioElement);
+
+        panner = audioContext.createPanner();
+        panner.panningModel = 'HRTF';
+        panner.distanceModel = 'inverse';
+        panner.refDistance = 1;
+        panner.maxDistance = 10000;
+        panner.rolloffFactor = 1;
+        panner.coneInnerAngle = 360;
+        panner.coneOuterAngle = 0;
+        panner.coneOuterGain = 0;
+
+        lowpassFilter = audioContext.createBiquadFilter();
+        lowpassFilter.type = 'lowpass';
+        lowpassFilter.frequency.value = 1000;
+
+        updateAudioRouting();
+    }
+
+    function updateAudioRouting() {
+        if (lowpassCheckbox.checked) {
+            track.disconnect();
+            track.connect(lowpassFilter).connect(panner).connect(audioContext.destination);
+        } else {
+            track.disconnect();
+            track.connect(panner).connect(audioContext.destination);
+        }
+    }
+
+    lowpassCheckbox.addEventListener('change', updateAudioRouting);
+
+    audioElement.addEventListener('play', function() {
+        if (!audioContext) {
+            initializeAudio();
+        }
+    });
+
+    audioElement.play().catch(() => {
+        console.log('Audio playback prevented. User interaction required.');
+    });
 }
 
 document.getElementById("conv").addEventListener("change",(e)=>{
